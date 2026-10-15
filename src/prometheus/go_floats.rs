@@ -43,16 +43,11 @@ impl SerializeGoFloat for bool {
     }
 }
 
-const ALPH: &[u8; 16] = b"0123456789abcdef";
-
+// Prometheus' text parser does not accept Go's hexadecimal float notation,
+// so floats are written in the shortest decimal form that round-trips.
 macro_rules! to_go_string_impl {
-    ($fname:ident, $Type:ty, $Bits:ty) => {
+    ($fname:ident, $Type:ty) => {
         fn $fname(float: $Type, out: &mut impl fmt::Write) -> fmt::Result {
-            const FRAC_BITS: u32 = <$Type>::MANTISSA_DIGITS - 1;
-            const FRAC_MASK: $Bits = (1 << FRAC_BITS) - 1;
-            const EXP_BITS: u32 = <$Bits>::BITS - FRAC_BITS - 1;
-            const EXP_MASK: $Bits = (1 << EXP_BITS) - 1;
-
             if float.is_nan() {
                 return out.write_str("NaN");
             }
@@ -67,27 +62,18 @@ macro_rules! to_go_string_impl {
                 return out.write_char('0');
             }
 
-            let bits: $Bits = float.to_bits();
-
-            let mut fraction = bits & FRAC_MASK;
-            let exponent = ((bits >> FRAC_BITS) & EXP_MASK);
-            let sign = if float.is_sign_positive() { '+' } else { '-' };
-            let leading = if exponent == 0 { '0' } else { '1' };
-            let exponent = exponent as i16 - ((1 << (EXP_BITS - 1)) - 1);
-            write!(out, "{sign}0x{leading}.")?;
-            fraction <<= <$Bits>::BITS - FRAC_BITS;
-            while fraction != 0 {
-                let ch = ALPH[((fraction >> (<$Bits>::BITS - 4)) & 0xf) as usize] as char;
-                out.write_char(ch)?;
-                fraction <<= 4;
+            let abs = float.abs();
+            if abs >= 1e21 || abs < 1e-7 {
+                write!(out, "{float:e}")
+            } else {
+                write!(out, "{float}")
             }
-            write!(out, "p{exponent}")
         }
     };
 }
 
-to_go_string_impl!(f32_to_go_string, f32, u32);
-to_go_string_impl!(f64_to_go_string, f64, u64);
+to_go_string_impl!(f32_to_go_string, f32);
+to_go_string_impl!(f64_to_go_string, f64);
 
 #[cfg(test)]
 mod tests {
@@ -99,7 +85,7 @@ mod tests {
         // Exponent 0xfe -> 2^(0xfe - 127) = 2^127
         let float = f32::from_bits(0x7f_00_00_00);
         f32_to_go_string(float, &mut buf).unwrap();
-        assert_eq!(buf, "+0x1.p127");
+        assert_eq!(buf, "1.7014118e38");
     }
 
     #[test]
@@ -108,27 +94,27 @@ mod tests {
         // Exponent 0x7fe -> 2^(0x7fe - 1023) = 2^1023
         let float = f64::from_bits(0x7f_e0_00_00_00_00_00_00);
         f64_to_go_string(float, &mut buf).unwrap();
-        assert_eq!(buf, "+0x1.p1023");
+        assert_eq!(buf, "8.98846567431158e307");
     }
 
     #[test]
     fn small_f32_to_go_string() {
         let mut buf = String::new();
         f32_to_go_string(0.15625, &mut buf).unwrap();
-        assert_eq!(buf, "+0x1.4p-3");
+        assert_eq!(buf, "0.15625");
         buf.clear();
         f32_to_go_string(-0.15625, &mut buf).unwrap();
-        assert_eq!(buf, "-0x1.4p-3");
+        assert_eq!(buf, "-0.15625");
     }
 
     #[test]
     fn small_f64_to_go_string() {
         let mut buf = String::new();
         f64_to_go_string(0.15625, &mut buf).unwrap();
-        assert_eq!(buf, "+0x1.4p-3");
+        assert_eq!(buf, "0.15625");
         buf.clear();
         f64_to_go_string(-0.15625, &mut buf).unwrap();
-        assert_eq!(buf, "-0x1.4p-3");
+        assert_eq!(buf, "-0.15625");
     }
 
     #[test]
@@ -138,7 +124,7 @@ mod tests {
         let float = f32::from_bits(1);
         assert!(float.is_sign_positive() && float.is_subnormal());
         f32_to_go_string(float, &mut buf).unwrap();
-        assert_eq!(buf, "+0x0.000002p-127");
+        assert_eq!(buf, "1e-45");
     }
 
     #[test]
@@ -148,7 +134,7 @@ mod tests {
         let float = f64::from_bits(1);
         assert!(float.is_sign_positive() && float.is_subnormal());
         f64_to_go_string(float, &mut buf).unwrap();
-        assert_eq!(buf, "+0x0.0000000000001p-1023");
+        assert_eq!(buf, "5e-324");
     }
 
     #[test]
@@ -173,14 +159,14 @@ mod tests {
     fn one_f32_to_go_string() {
         let mut buf = String::new();
         f32_to_go_string(1., &mut buf).unwrap();
-        assert_eq!(buf, "+0x1.p0");
+        assert_eq!(buf, "1");
     }
 
     #[test]
     fn one_f64_to_go_string() {
         let mut buf = String::new();
         f64_to_go_string(1., &mut buf).unwrap();
-        assert_eq!(buf, "+0x1.p0");
+        assert_eq!(buf, "1");
     }
 
     #[test]
