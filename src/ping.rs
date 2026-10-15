@@ -221,6 +221,8 @@ pub enum PingErrorKind {
     NetworkError,
     #[error("Multiple identical request")]
     IdenticalRequests,
+    #[error("Client destroyed")]
+    ClientDestroyed,
 }
 
 impl From<SurgeError> for PingErrorKind {
@@ -233,6 +235,7 @@ impl From<SurgeError> for PingErrorKind {
             SurgeError::EchoRequestPacket => Self::EchoRequestPacket,
             SurgeError::NetworkError => Self::NetworkError,
             SurgeError::IdenticalRequests { .. } => Self::IdenticalRequests,
+            SurgeError::ClientDestroyed => Self::ClientDestroyed,
         }
     }
 }
