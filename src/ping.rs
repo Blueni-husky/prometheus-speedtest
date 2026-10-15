@@ -81,7 +81,16 @@ async fn sample_pings(
     if samples == 0 {
         return (Vec::new(), Vec::new());
     }
-    let client = surge_ping::Client::new(&surge_ping::ConfigBuilder::default().build()).unwrap();
+    let client = match surge_ping::Client::new(&surge_ping::ConfigBuilder::default().build()) {
+        Ok(client) => client,
+        Err(err) => {
+            tracing::error!(
+                "Failed to open ICMP socket (missing CAP_NET_RAW or ping_group_range?): {err}"
+            );
+            let kind = PingErrorKind::IOError { kind: err.kind() };
+            return (vec![f32::NAN; samples], vec![kind; samples]);
+        }
+    };
     let mut seq = 0;
 
     let mut set = JoinSet::<(usize, Result<(IcmpPacket, Duration), SurgeError>)>::new();
